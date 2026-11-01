@@ -48,6 +48,8 @@ mod tests {
             ..Default::default()
         };
         drop_finger_pointer(&mut raw);
-        ctx.run_ui(raw, |ui| assert!(!ui.input(|i| i.pointer.primary_down())));
+        let mut down = true;
+        ctx.run_ui(raw, |ui| down = ui.input(|i| i.pointer.primary_down())).textures_delta.clear();
+        assert!(!down);
     }
 }
