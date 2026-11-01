@@ -256,7 +256,7 @@ impl eframe::App for PhotocraftApp {
         // A finger navigates and never paints, unless Finger Painting is on: the touch events
         // stay for pinch and pan, the pointer presses and moves emulated from them go.
         if !self.session.prefs().enhanced_controls.finger_painting && self.services.finger_contact.as_ref().is_some_and(|f| f()) {
-            input::finger_filter::drop_finger_pointer(raw_input);
+            crate::input::finger_filter::drop_finger_pointer(raw_input);
         }
         self.inject_synthetic(ctx, raw_input);
         // After the control channel's own events (`ui.type`) join the OS's, before any widget.
