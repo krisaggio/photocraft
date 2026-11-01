@@ -5,12 +5,21 @@
 //! does not update `GetAsyncKeyState(VK_RBUTTON)` for stylus barrel buttons. This thread-local
 //! `WH_GETMESSAGE` hook inspects `WM_POINTER*` messages on the UI thread's message queue to
 //! track the physical barrel button state.
+//!
+//! The same messages say what touched the screen (`GetPointerType`), which winit does not: a
+//! finger and a pen both arrive as `WindowEvent::Touch`. The hook keeps count of the fingers
+//! down, so the app can tell a finger from the pen ([`take_finger_contact`]).
 
 #![allow(unsafe_code, clippy::upper_case_acronyms)]
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 static BARREL_DOWN: AtomicBool = AtomicBool::new(false);
+/// Fingers (`PT_TOUCH` pointers) currently down.
+static FINGERS_DOWN: AtomicU32 = AtomicU32::new(0);
+/// A finger went down, moved or lifted since [`take_finger_contact`] last ran, so a tap that
+/// starts and ends between two frames still counts.
+static FINGER_ACTIVITY: AtomicBool = AtomicBool::new(false);
 
 #[repr(C)]
 struct POINT {
@@ -71,6 +80,7 @@ unsafe extern "system" {
     fn CallNextHookEx(hhk: *mut std::ffi::c_void, n_code: i32, w_param: usize, l_param: isize) -> isize;
     fn GetCurrentThreadId() -> u32;
     fn GetPointerPenInfo(pointer_id: u32, pen_info: *mut POINTER_PEN_INFO) -> i32;
+    fn GetPointerType(pointer_id: u32, pointer_type: *mut u32) -> i32;
 }
 
 const WH_GETMESSAGE: i32 = 3;
@@ -78,6 +88,23 @@ const WM_POINTERUPDATE: u32 = 0x0245;
 const WM_POINTERDOWN: u32 = 0x0246;
 const WM_POINTERUP: u32 = 0x0247;
 const WM_POINTERLEAVE: u32 = 0x024A;
+
+/// `PT_TOUCH` (winuser.h `POINTER_INPUT_TYPE`): the pointer is a finger.
+pub const PT_TOUCH: u32 = 2;
+
+/// How a `WM_POINTER*` message changes the number of fingers down: a finger going down adds one,
+/// a finger lifting removes one (never below zero). A pen or mouse going down means no finger
+/// is left that still counts, so a finger whose release the hook never saw cannot make the pen
+/// look like a finger for good.
+pub fn fingers_after(fingers: u32, message: u32, pointer_type: Option<u32>) -> u32 {
+    let touch = pointer_type == Some(PT_TOUCH);
+    match message {
+        WM_POINTERDOWN if touch => fingers.saturating_add(1),
+        WM_POINTERDOWN => 0,
+        WM_POINTERUP if touch => fingers.saturating_sub(1),
+        _ => fingers,
+    }
+}
 
 /// `PEN_FLAG_BARREL` (winuser.h): the barrel button of the pen is pressed.
 pub const PEN_FLAG_BARREL: u32 = 0x00000001;
@@ -102,6 +129,18 @@ unsafe extern "system" fn get_msg_proc(code: i32, w_param: usize, l_param: isize
         // SAFETY: Win32 guarantees that for code >= 0, l_param points to a valid MSG struct
         // dispatched to this thread's message queue.
         let msg = unsafe { &*(l_param as *const MSG) };
+        let is_pointer = matches!(msg.message, WM_POINTERDOWN | WM_POINTERUPDATE | WM_POINTERUP | WM_POINTERLEAVE);
+        if is_pointer {
+            let pointer_id = (msg.w_param & 0xFFFF) as u32;
+            let mut kind = 0u32;
+            // SAFETY: `kind` is a valid out pointer and `pointer_id` comes from the WM_POINTER message.
+            let pointer_type = unsafe { GetPointerType(pointer_id, &mut kind) != 0 }.then_some(kind);
+            if pointer_type == Some(PT_TOUCH) {
+                FINGER_ACTIVITY.store(true, Ordering::Relaxed);
+            }
+            let before = FINGERS_DOWN.load(Ordering::Relaxed);
+            FINGERS_DOWN.store(fingers_after(before, msg.message, pointer_type), Ordering::Relaxed);
+        }
         match msg.message {
             WM_POINTERDOWN | WM_POINTERUPDATE => {
                 let pointer_id = (msg.w_param & 0xFFFF) as u32;
@@ -157,7 +196,15 @@ impl Drop for Monitor {
             UnhookWindowsHookEx(self.hook);
         }
         BARREL_DOWN.store(false, Ordering::Relaxed);
+        FINGERS_DOWN.store(0, Ordering::Relaxed);
+        FINGER_ACTIVITY.store(false, Ordering::Relaxed);
     }
+}
+
+/// Is a finger on the screen, or did one touch or leave since the last call? Call it once per
+/// frame: it clears the "since" part, so a tap shorter than a frame is still seen once.
+pub fn take_finger_contact() -> bool {
+    FINGER_ACTIVITY.swap(false, Ordering::Relaxed) || FINGERS_DOWN.load(Ordering::Relaxed) > 0
 }
 
 /// Returns true if the stylus barrel button is physically pressed.
@@ -171,6 +218,20 @@ mod tests {
 
     const POINTER_FLAG_INCONTACT: u32 = 0x0004;
     const POINTER_FLAG_FIRSTBUTTON: u32 = 0x0010;
+
+    #[test]
+    fn fingers_are_counted_and_a_pen_resets_them() {
+        let touch = Some(PT_TOUCH);
+        let pen = Some(3);
+        assert_eq!(fingers_after(0, WM_POINTERDOWN, touch), 1);
+        assert_eq!(fingers_after(1, WM_POINTERDOWN, touch), 2);
+        assert_eq!(fingers_after(2, WM_POINTERUP, touch), 1);
+        assert_eq!(fingers_after(0, WM_POINTERUP, touch), 0, "never below zero");
+        assert_eq!(fingers_after(1, WM_POINTERUPDATE, touch), 1);
+        assert_eq!(fingers_after(1, WM_POINTERDOWN, pen), 0, "a pen down clears a finger whose release was missed");
+        assert_eq!(fingers_after(1, WM_POINTERUP, pen), 1, "a pen lifting leaves the fingers alone");
+        assert_eq!(fingers_after(1, WM_POINTERDOWN, None), 0);
+    }
 
     #[test]
     fn plain_pen_contact_is_not_treated_as_barrel() {

@@ -366,6 +366,10 @@ pub type CaptionStyleFn = Box<dyn Fn(&egui::Context) -> CaptionStyle>;
 /// Physical right mouse button or stylus barrel button down (Windows; read for brush resize).
 pub type RightButtonDownFn = Box<dyn Fn() -> bool + Send + Sync>;
 
+/// A finger is on, or just touched or left, a touch screen (Windows; the pen and the mouse are
+/// not fingers). Read once per frame by [`input::finger_filter`](crate::input::finger_filter).
+pub type FingerContactFn = Box<dyn Fn() -> bool + Send + Sync>;
+
 /// Platform services injected by the app binary (file dialogs, codecs), keeping this crate free of
 /// I/O dependencies.
 #[derive(Default)]
@@ -480,6 +484,9 @@ pub struct Services {
     pub caption_style: Option<CaptionStyleFn>,
     /// Physical right mouse button or pen barrel button currently down.
     pub right_button_down: Option<RightButtonDownFn>,
+    /// A finger is in contact with a touch screen (Windows); `None` where the platform cannot
+    /// tell fingers from pens, so every touch is treated as the pen's.
+    pub finger_contact: Option<FingerContactFn>,
     /// The persistent brush preset store, loading in the background (desktop; see
     /// `photocraft_engine::preset_store`). Attached to the session once it arrives; without
     /// one, brush presets are session-only unless the shell attached a store before startup.

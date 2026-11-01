@@ -1,0 +1,30 @@
+# Test build of the finger-painting fix: unit tests for the touched crates, then a release
+# photocraft.exe uploaded as an artifact.
+name: Windows test build
+
+on:
+  push:
+    branches: [finger-no-paint]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Tests
+        run: cargo test -p photocraft-tablet -p photocraft-engine --lib
+      - name: Finger filter tests
+        run: cargo test -p photocraft-ui-egui --lib finger_filter
+      - name: Build
+        run: cargo build --release -p photocraft
+      - uses: actions/upload-artifact@v4
+        with:
+          name: photocraft-windows-x64
+          path: target/release/photocraft.exe

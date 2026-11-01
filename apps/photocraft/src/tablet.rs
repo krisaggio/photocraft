@@ -46,6 +46,18 @@ pub fn right_button_service() -> Option<photocraft_ui_egui::RightButtonDownFn> {
     Some(Box::new(photocraft_tablet::windows::is_barrel_button_down))
 }
 
+/// Finger contact check (Windows): winit reports a finger and a pen alike as touch, the pointer
+/// message hook tells them apart.
+#[cfg(target_os = "windows")]
+pub fn finger_contact_service() -> Option<photocraft_ui_egui::FingerContactFn> {
+    Some(Box::new(photocraft_tablet::windows::take_finger_contact))
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn finger_contact_service() -> Option<photocraft_ui_egui::FingerContactFn> {
+    None
+}
+
 #[cfg(not(target_os = "windows"))]
 pub fn right_button_service() -> Option<photocraft_ui_egui::RightButtonDownFn> {
     None

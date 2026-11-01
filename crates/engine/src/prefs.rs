@@ -921,13 +921,23 @@ impl TypePrefs {
 pub struct EnhancedControls {
     pub scrubby_slider_acceleration: bool,
     pub touch_gestures: bool,
+    /// A finger on a touch screen paints like a pen. Off (the default), fingers only navigate
+    /// (pinch, pan) and the pen and mouse paint, so resting a finger or starting a two-finger
+    /// gesture on a pen display never leaves a stroke. Windows only for now.
+    pub finger_painting: bool,
     pub zoom_with_trackpad_pinch: bool,
     pub rotate_view_with_trackpad: bool,
 }
 
 impl Default for EnhancedControls {
     fn default() -> Self {
-        Self { scrubby_slider_acceleration: true, touch_gestures: true, zoom_with_trackpad_pinch: true, rotate_view_with_trackpad: false }
+        Self {
+            scrubby_slider_acceleration: true,
+            touch_gestures: true,
+            finger_painting: false,
+            zoom_with_trackpad_pinch: true,
+            rotate_view_with_trackpad: false,
+        }
     }
 }
 
